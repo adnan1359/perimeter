@@ -147,6 +147,26 @@ export class SessionManager {
     // Set extension action badge
     this.updateBadge('ON', '#16a34a');
 
+    // Proactive Tab Sweep: If the current active tab is unapproved, immediately
+    // redirect it to the extension UI so the user does not need to refresh.
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
+      chrome.tabs.query({ currentWindow: true, active: true }, async (activeTabs) => {
+        if (activeTabs && activeTabs[0] && activeTabs[0].id) {
+          const activeTab = activeTabs[0];
+          const activeUrl = activeTab.url || activeTab.pendingUrl || '';
+          if (
+            activeUrl &&
+            !DomainValidator.isExtensionPage(activeUrl) &&
+            !DomainValidator.isAllowedSystemPage(activeUrl) &&
+            !DomainValidator.isAllowedDomain(activeUrl, allowedDomains)
+          ) {
+            const redirectUrl = PolicyEngine.getBlockedPageUrl(session, activeUrl);
+            await chrome.tabs.update(activeTab.id, { url: redirectUrl });
+          }
+        }
+      });
+    }
+
     return session;
   }
 

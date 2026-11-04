@@ -117,15 +117,36 @@ export default function App() {
     }
   }, [activeTabId]);
 
+  // Proactively check current tab when session starts or tab changes
+  useEffect(() => {
+    if (activeSession && activeSession.status === 'active' && currentTab) {
+      if (
+        !DomainValidator.isExtensionPage(currentTab.url) &&
+        !DomainValidator.isAllowedSystemPage(currentTab.url) &&
+        !DomainValidator.isAllowedDomain(currentTab.url, activeSession.allowedDomains)
+      ) {
+        const remaining = PolicyEngine.calculateRemainingMinutes(activeSession);
+        setBlockedDetails({
+          goal: activeSession.goal,
+          attempted: currentTab.url,
+          domain: currentTab.domain || 'unapproved',
+          remaining,
+        });
+        setCurrentTabIsBlocked(true);
+      }
+    }
+  }, [activeSession, activeTabId]);
+
   /**
-   * Tab Activation Simulation:
-   * Rule: "When user switches tabs: If tab domain is not approved:
-   * Immediately: chrome.tabs.remove(tabId). No warning. No delay. No confirmation.
-   * The tab must close instantly."
+   * Tab Activation:
+   * When user switches to an already-present tab where the opened website is not
+   * in the allowed list, immediately redirect it to the extension UI without requiring a refresh.
    */
   const handleSelectTab = async (tabId: number) => {
     const target = simulatedTabs.find((t) => t.tabId === tabId);
     if (!target) return;
+
+    setActiveTabId(tabId);
 
     if (activeSession && activeSession.status === 'active') {
       const decision = await PolicyEngine.evaluateTabActivation(
@@ -135,33 +156,22 @@ export default function App() {
         simulatedTabs.length
       );
 
-      if (decision.shouldCloseTab) {
-        // Instant termination!
-        setSimulatedTabs((prev) => prev.filter((t) => t.tabId !== tabId));
-        showToast(`Instant Termination: Tab "${target.domain}" closed immediately (unapproved workspace)`);
-
-        // If we closed the tab that was going to be activated, stay on a safe tab
-        const remaining = simulatedTabs.filter((t) => t.tabId !== tabId);
-        if (remaining.length > 0) {
-          setActiveTabId(remaining[0].tabId);
-        }
-        return;
-      } else if (decision.safeRedirectUrl) {
-        // Last tab in window: redirect safely to prevent killing the window
-        showToast(`Single-Tab Window Guard: Redirected "${target.domain}" to boundary screen`);
+      if (!decision.allowed) {
+        // Immediately redirect to extension UI without requiring page refresh!
         const remaining = PolicyEngine.calculateRemainingMinutes(activeSession);
         setBlockedDetails({
           goal: activeSession.goal,
           attempted: target.url,
-          domain: decision.domain || 'unapproved',
+          domain: decision.domain || target.domain || 'unapproved',
           remaining,
         });
         setCurrentTabIsBlocked(true);
+        showToast(`Instant Redirection: Switched to unapproved tab "${target.domain}". Redirected to extension UI.`);
         return;
       }
     }
 
-    setActiveTabId(tabId);
+    setCurrentTabIsBlocked(false);
   };
 
   /**

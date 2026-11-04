@@ -25,6 +25,7 @@ export interface NavigationDecision {
 export interface TabActivationDecision {
   allowed: boolean;
   shouldCloseTab: boolean;
+  redirectUrl?: string;
   safeRedirectUrl?: string;
   domain?: string;
   violation?: Violation;
@@ -211,25 +212,22 @@ export class PolicyEngine {
       attemptedUrl: tabUrl,
       domain,
       tabId,
-      actionTaken: 'tab_removed',
-      reason: `Switched to unapproved existing tab (${domain}).`,
+      actionTaken: 'blocked_navigation',
+      reason: `Switched to unapproved existing tab (${domain}). Immediately redirected to extension UI.`,
     };
 
     await storage.recordViolation(violation);
 
-    // If this is the last tab in the window, do NOT remove it (which would destroy the window);
-    // redirect it to the blocked page instead!
-    const isOnlyTab = windowTabCount <= 1;
+    const redirectUrl = this.getBlockedPageUrl(session, tabUrl);
 
     return {
       allowed: false,
-      shouldCloseTab: !isOnlyTab,
-      safeRedirectUrl: isOnlyTab ? this.getBlockedPageUrl(session, tabUrl) : undefined,
+      shouldCloseTab: false,
+      redirectUrl,
+      safeRedirectUrl: redirectUrl,
       domain,
       violation,
-      reason: isOnlyTab
-        ? `Last tab in window redirected to boundary screen to prevent accidental window destruction.`
-        : `Tab ${tabId} (${domain}) closed immediately to preserve focus boundary.`,
+      reason: `Tab ${tabId} (${domain}) is outside workspace boundary. Immediately redirected to extension UI.`,
     };
   }
 

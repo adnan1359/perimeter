@@ -131,37 +131,60 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 /**
  * 4. Existing Tab Switch Enforcement: chrome.tabs.onActivated
- * Immediate termination with single-tab window safety guard.
+ * When user switches to an already-opened tab with an unapproved website,
+ * immediately redirects it to the extension UI (blocked.html) without requiring page refresh.
  */
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   const session = await storage.getCurrentSession();
   if (!session || session.status !== 'active') return;
 
   try {
-    const [tab, windowTabs] = await Promise.all([
-      chrome.tabs.get(activeInfo.tabId),
-      chrome.tabs.query({ windowId: activeInfo.windowId }),
-    ]);
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    const tabUrl = tab?.url || tab?.pendingUrl || '';
+    if (!tabUrl) return;
 
-    if (!tab || !tab.url) return;
+    // Skip if already on extension UI or allowed system page
+    if (DomainValidator.isExtensionPage(tabUrl) || DomainValidator.isAllowedSystemPage(tabUrl)) return;
 
     const decision = await PolicyEngine.evaluateTabActivation(
       session,
-      tab.url,
-      activeInfo.tabId,
-      windowTabs.length
+      tabUrl,
+      activeInfo.tabId
     );
 
-    if (decision.shouldCloseTab) {
-      console.warn(`[TBE Worker] Unapproved tab switch. Closing tab ${activeInfo.tabId} (${decision.domain}) immediately.`);
-      await chrome.tabs.remove(activeInfo.tabId);
-    } else if (decision.safeRedirectUrl) {
-      // Last tab in window: redirect safely rather than closing entire window
-      console.warn(`[TBE Worker] Unapproved last tab in window. Redirecting to recovery page.`);
-      await chrome.tabs.update(activeInfo.tabId, { url: decision.safeRedirectUrl });
+    if (!decision.allowed && decision.redirectUrl) {
+      console.warn(`[TBE Worker] Unapproved tab switch (${decision.domain}). Immediately redirecting tab ${activeInfo.tabId} to extension UI.`);
+      await chrome.tabs.update(activeInfo.tabId, { url: decision.redirectUrl });
     }
   } catch (err) {
     console.debug('[TBE Worker] Tab activation check note:', err);
+  }
+});
+
+/**
+ * 4b. Window Focus Enforcement: chrome.windows.onFocusChanged
+ * When the user switches between browser windows, immediately validates
+ * the active tab in the focused window and redirects if unapproved.
+ */
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+
+  const session = await storage.getCurrentSession();
+  if (!session || session.status !== 'active') return;
+
+  try {
+    const [activeTab] = await chrome.tabs.query({ windowId, active: true });
+    if (!activeTab || !activeTab.id) return;
+    const tabUrl = activeTab.url || activeTab.pendingUrl || '';
+    if (!tabUrl || DomainValidator.isExtensionPage(tabUrl) || DomainValidator.isAllowedSystemPage(tabUrl)) return;
+
+    const decision = await PolicyEngine.evaluateTabActivation(session, tabUrl, activeTab.id);
+    if (!decision.allowed && decision.redirectUrl) {
+      console.warn(`[TBE Worker] Focused window active tab unapproved (${decision.domain}). Immediately redirecting to extension UI.`);
+      await chrome.tabs.update(activeTab.id, { url: decision.redirectUrl });
+    }
+  } catch (err) {
+    console.debug('[TBE Worker] Window focus check note:', err);
   }
 });
 
