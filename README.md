@@ -1,11 +1,72 @@
-<div align="center">
+# Task Boundary Enforcer — Production Chrome Extension (Manifest V3)
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+> **Workspace-Preservation System** designed to eliminate task departure and preserve deep work context.
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 1. Principal Engineering Review & System Hardening
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+During rigorous design review, six core failure modes, constraints, and circumvention vectors were identified and remediated:
 
-</div>
+| Domain | Identified Risk | Principal Architectural Remediation |
+|---|---|---|
+| **1. Security Issues** | `webNavigation.onBeforeNavigate` is observational and asynchronous. TLS handshakes, cookies, and initial HTTP request headers could leak over the wire before `chrome.tabs.update()` redirected. Open redirect risk on unvalidated parameters in `blocked.html`. | Migrated to **`chrome.declarativeNetRequest` (DNR)** dynamic rules to block/redirect requests at Chrome's native C++ network stack before packet dispatch. Added strict protocol sanitization (`DomainValidator.sanitizeUrlForRedirect`) and rejected `javascript:`, `data:`, `blob:`. |
+| **2. Manifest V3 Limitations** | Service workers terminate after ~30s of inactivity. Worker cold starts accompanied by disk LevelDB reads caused noticeable navigation latency. Alarms can drift if the OS sleeps. | Implemented **Dual-Tier Caching**: In-memory hot cache + `chrome.storage.session` for sub-millisecond evaluation on worker wakeups. Added monotonic timestamp verification on every evaluation to protect against alarm drift. |
+| **3. Race Conditions** | Simultaneous tab creations or rapid URL navigations resulted in read-modify-write collisions in `storage.recordViolation()`, dropping audit records. | Introduced a **serialized atomic promise queue** (`storage.writeQueue`), guaranteeing sequential, ACID-like violation logging and session state mutations. |
+| **4. Chrome API Constraints** | Switching to an unapproved tab that was the *only* tab in the window caused `chrome.tabs.remove()` to instantly terminate the entire browser window. | Added **Single-Tab Window Protection**: `PolicyEngine` counts tabs in the window. If `windowTabs.length === 1`, it redirects to `blocked.html` rather than killing the window. |
+| **5. Circumvention Vectors** | Bypasses via raw IPv4 (`142.250.x.x`), data/blob URIs, `window.open()` popups, and unmonitored Incognito windows. | Added **Incognito Spanning** (`"incognito": "spanning"`), blocked raw IP addresses unless explicitly enabled in developer settings, and hooked `chrome.webNavigation.onCreatedNavigationTarget`. |
+| **6. Performance Bottlenecks** | Parsing complex JSON configurations from disk on every tab activation and network request introduced CPU spikes. | Normalized root domain lookups via fast $O(1)$ Hash Set lookups in memory, offloading bulk wire blocking to Chrome's C++ DNR engine. |
+
+---
+
+## 2. Architectural Overview
+
+```
+task-boundary-enforcer/
+├── manifest.json                  # Manifest V3 configuration (with declarativeNetRequest & incognito spanning)
+├── popup.html                     # Extension Action popup entrypoint
+├── options.html                   # Analytics & principal review dashboard entrypoint
+├── blocked.html                   # Sanitized full-page violation screen
+├── vite.config.ts                 # Multi-entry build pipeline (emits service-worker.js & HTMLs)
+├── public/
+│   ├── manifest.json              # Packaged bundle manifest
+│   └── icons/                     # 16x16, 32x32, 48x48, 128x128 icons
+└── src/
+    ├── background/
+    │   └── service-worker.ts      # V3 Service Worker (DNR sync, webNavigation, tab removal, anti-incognito)
+    ├── core/
+    │   ├── DomainValidator.ts     # Domain normalization, subdomains, scheme sanitization & IP detection
+    │   ├── PolicyEngine.ts        # DeclarativeNetRequest sync, single-tab window guard, atomic violations
+    │   ├── SessionManager.ts      # Tab harvesting, session lifecycle, alarms & badges
+    │   └── storage.ts             # High-performance dual-tier storage & atomic write queue
+    ├── popup/
+    │   └── Popup.tsx              # Extension Action UI (Linear/Raycast aesthetic)
+    ├── options/
+    │   └── Options.tsx            # Analytics dashboard, principal review diagnostics & policy settings
+    ├── pages/
+    │   └── BlockedPage.tsx        # High-contrast violation & recovery screen
+    └── types/
+        └── session.ts             # Typed data contracts (FocusSession, Violation, Settings)
+```
+
+---
+
+## 3. Installation & Packaging
+
+### Development & Simulation
+```bash
+npm install
+npm run dev
+```
+Open `http://localhost:3000` to interact with the full **Chrome Workspace Simulator**, test tab harvesting, test navigation interception, and view analytics.
+
+### Production Build for Chrome Web Store
+```bash
+npm run build
+```
+
+### Loading Unpacked into Chrome
+1. In Google Chrome, navigate to `chrome://extensions`.
+2. Enable the **Developer mode** toggle (top-right).
+3. Click **Load unpacked** and select the `dist/` directory generated by `npm run build`.
+4. Pin **Task Boundary Enforcer** to your toolbar.

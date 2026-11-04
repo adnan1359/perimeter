@@ -1,0 +1,6 @@
+{
+  "name": "Task Boundary Enforcer",
+  "description": "Production-quality Chrome Extension workspace-preservation system that enforces strict task boundaries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
