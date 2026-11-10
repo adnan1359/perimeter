@@ -25,6 +25,7 @@ export const Options: React.FC = () => {
   const [history, setHistory] = useState<FocusSession[]>([]);
   const [violations, setViolations] = useState<Violation[]>([]);
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
+  const [durationInput, setDurationInput] = useState(String(DEFAULT_SETTINGS.defaultDurationMinutes));
   const [savedNotice, setSavedNotice] = useState(false);
   const [isIncognitoAllowed, setIsIncognitoAllowed] = useState<boolean>(true);
 
@@ -42,6 +43,7 @@ export const Options: React.FC = () => {
   const loadData = async () => {
     const s = await storage.getSettings();
     setSettings(s);
+    setDurationInput(String(s.defaultDurationMinutes));
     const a = await storage.getAnalytics();
     setAnalytics(a);
     const h = await storage.getSessionHistory();
@@ -688,19 +690,29 @@ export const Options: React.FC = () => {
                     Standard timer length in minutes when initializing a new task boundary.
                   </div>
                 </div>
-                <select
-                  value={settings.defaultDurationMinutes}
-                  onChange={(e) =>
-                    handleSaveSettings({ defaultDurationMinutes: parseInt(e.target.value, 10) })
-                  }
-                  className="px-2.5 py-1 bg-neutral-950 border border-neutral-800 rounded text-xs font-mono text-white focus:outline-none"
-                >
-                  <option value={25}>25 minutes</option>
-                  <option value={45}>45 minutes</option>
-                  <option value={60}>60 minutes</option>
-                  <option value={90}>90 minutes</option>
-                  <option value={120}>120 minutes</option>
-                </select>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={5}
+                    step={1}
+                    aria-label="Default session duration in minutes"
+                    value={durationInput}
+                    onChange={(e) => setDurationInput(e.target.value)}
+                    onBlur={() => {
+                      const durationMinutes = Number(durationInput);
+                      if (Number.isInteger(durationMinutes) && durationMinutes >= 5) {
+                        setDurationInput(String(durationMinutes));
+                        if (durationMinutes !== settings.defaultDurationMinutes) {
+                          handleSaveSettings({ defaultDurationMinutes: durationMinutes });
+                        }
+                      } else {
+                        setDurationInput(String(settings.defaultDurationMinutes));
+                      }
+                    }}
+                    className="w-24 px-2.5 py-1 bg-neutral-950 border border-neutral-800 rounded text-xs font-mono text-white focus:outline-none"
+                  />
+                  <span className="text-xs text-neutral-400">minutes</span>
+                </div>
               </div>
             </div>
           </div>

@@ -20,7 +20,7 @@ export const Popup: React.FC<PopupProps> = ({
 }) => {
   const [session, setSession] = useState<FocusSession | null>(customSession || null);
   const [goal, setGoal] = useState('');
-  const [duration, setDuration] = useState<number>(45);
+  const [duration, setDuration] = useState('45');
   const [availableTabs, setAvailableTabs] = useState<CapturedTab[]>([]);
   const [selectedTabIds, setSelectedTabIds] = useState<Set<number>>(new Set());
   const [newDomainInput, setNewDomainInput] = useState('');
@@ -44,6 +44,8 @@ export const Popup: React.FC<PopupProps> = ({
       setSession(current);
 
       if (!current) {
+        const settings = await storage.getSettings();
+        setDuration(String(settings.defaultDurationMinutes));
         const tabs = await SessionManager.harvestCurrentWindowTabs();
         setAvailableTabs(tabs);
         setSelectedTabIds(new Set(tabs.map((t) => t.tabId)));
@@ -112,12 +114,13 @@ export const Popup: React.FC<PopupProps> = ({
 
   const handleStartSession = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!goal.trim()) return;
+    const durationMinutes = Number(duration);
+    if (!goal.trim() || !Number.isInteger(durationMinutes) || durationMinutes < 5) return;
 
     const filteredTabs = availableTabs.filter((t) => selectedTabIds.has(t.tabId));
     const newSession = await SessionManager.startSession(
       goal.trim(),
-      duration,
+      durationMinutes,
       filteredTabs,
       manualDomains
     );
@@ -389,16 +392,16 @@ export const Popup: React.FC<PopupProps> = ({
         <div>
           <label className="block text-[11px] font-medium text-neutral-300 mb-1.5 flex items-center justify-between">
             <span>Focus Duration</span>
-            <span className="font-mono text-neutral-400 text-[10px]">{duration} minutes</span>
+            <span className="font-mono text-neutral-400 text-[10px]">{duration || '—'} minutes</span>
           </label>
           <div className="grid grid-cols-4 gap-1.5">
             {[25, 45, 60, 90].map((mins) => (
               <button
                 key={mins}
                 type="button"
-                onClick={() => setDuration(mins)}
+                onClick={() => setDuration(String(mins))}
                 className={`py-1.5 text-xs font-medium rounded-md border transition-colors ${
-                  duration === mins
+                  duration === String(mins)
                     ? 'bg-neutral-800 border-neutral-600 text-white shadow-sm'
                     : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900'
                 }`}
@@ -406,6 +409,19 @@ export const Popup: React.FC<PopupProps> = ({
                 {mins}m
               </button>
             ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              type="number"
+              min={5}
+              step={1}
+              required
+              aria-label="Focus duration in minutes"
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              className="w-24 px-2.5 py-1.5 bg-neutral-900 border border-neutral-800 rounded-md text-xs font-mono text-white focus:outline-none focus:border-neutral-600"
+            />
+            <span className="text-[11px] text-neutral-400">Custom minutes (minimum 5)</span>
           </div>
         </div>
 
@@ -503,7 +519,7 @@ export const Popup: React.FC<PopupProps> = ({
         {/* Primary CTA */}
         <button
           type="submit"
-          disabled={!goal.trim()}
+          disabled={!goal.trim() || !Number.isInteger(Number(duration)) || Number(duration) < 5}
           className="w-full py-2.5 bg-neutral-100 hover:bg-white text-neutral-950 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs rounded-md shadow transition-colors flex items-center justify-center gap-1.5"
         >
           <Shield className="w-3.5 h-3.5 text-neutral-950" />
